@@ -8,6 +8,12 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.8.0/xlsx.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
 
+<!-- Load Font Lato dari Google Fonts CDN -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Lato:ital,wght@0,400;0,700;1,400;1,700&display=swap"
+    rel="stylesheet">
+
 <style>
     * {
         font-family: 'Lato', sans-serif !important;
@@ -30,7 +36,6 @@
         }
 
         .page-container {
-            box-shadow: none !important;
             margin: 0 auto !important;
         }
     }
@@ -43,7 +48,6 @@
         box-sizing: border-box;
         padding: 10px;
         margin: 0 auto 20px auto;
-        box-shadow: 0 0 10px rgba(0, 0, 0, 0.25);
     }
 
     /* 1 baris data Excel = 1 baris canvas horizontal sejajar (tanpa wrap) */
@@ -68,7 +72,6 @@
 <div class="container-fluid p-4 d-print-none bg-light border-bottom">
     <div class="row g-3 align-items-center mb-3">
         <div class="col-md-9 col-sm-8">
-            <label class="form-label fw-bold">Unggah Excel</label>
             <input id="upload" type="file" name="files[]" class="form-control" accept=".xlsx, .xls">
         </div>
         <div class="col-md-3 col-sm-4 d-flex align-items-end">
@@ -111,7 +114,7 @@
 </div>
 
 <!-- Output Container dengan auto scroll horizontal -->
-<div class="tab-content text-start py-4 overflow-auto" style="background: #555; min-height: 100vh;" id="myTabContent">
+<div class="tab-content text-start py-4 overflow-auto" style="min-height: 100vh;" id="myTabContent">
 </div>
 
 <script>
@@ -164,11 +167,11 @@
             const isChecked = autoFieldsState[header] ? 'checked' : '';
 
             container.append(`
-        <div class="form-check form-check-inline">
-          <input class="form-check-input field-checkbox" type="checkbox" id="check_${idx}" data-field="${header}" ${isChecked}>
-          <label class="form-check-label small" for="check_${idx}">${header}</label>
-        </div>
-      `);
+                <div class="form-check form-check-inline">
+                    <input class="form-check-input field-checkbox" type="checkbox" id="check_${idx}" data-field="${header}" ${isChecked}>
+                    <label class="form-check-label small" for="check_${idx}">${header}</label>
+                </div>
+            `);
         });
 
         triggerAutoRender();
@@ -183,15 +186,18 @@
         return enabled;
     }
 
-    // Panggil proses render otomatis
+    // Panggil proses render otomatis dengan memastikan font sudah selesai di-load
     function triggerAutoRender() {
         if (Object.keys(rawWorkbookData).length === 0) return;
         const barcodeKey = $('#mapBarcode').val();
         const jenisMesinKey = $('#mapJenisMesin').val();
         const remainingKeys = getEnabledRemainingFields();
 
-        const renderer = new ExcelRenderer();
-        renderer.renderAll(barcodeKey, jenisMesinKey, remainingKeys);
+        // Menunggu browser menyelesaikan proses download dan parse font Lato
+        document.fonts.ready.then(() => {
+            const renderer = new ExcelRenderer();
+            renderer.renderAll(barcodeKey, jenisMesinKey, remainingKeys);
+        });
     }
 
     // Event Listener untuk Auto Render Instan
@@ -229,16 +235,16 @@
                 const isActive = index === 0;
 
                 $('#myTab').append(`
-          <li class="nav-item" role="presentation">
-            <button class="nav-link ${isActive ? 'active' : ''}" id="${sheetName}-tab" data-bs-toggle="tab" data-bs-target="#${sheetName}" type="button" role="tab">${sheetName}</button>
-          </li>
-        `);
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link ${isActive ? 'active' : ''}" id="${sheetName}-tab" data-bs-toggle="tab" data-bs-target="#${sheetName}" type="button" role="tab">${sheetName}</button>
+                    </li>
+                `);
 
                 $('#myTabContent').append(`
-          <div class="tab-pane fade ${isActive ? 'show active' : ''}" id="${sheetName}" role="tabpanel">
-            <div class="page-container" id="lato-${sheetName}"></div>
-          </div>
-        `);
+                    <div class="tab-pane fade ${isActive ? 'show active' : ''}" id="${sheetName}" role="tabpanel">
+                        <div class="page-container" id="lato-${sheetName}"></div>
+                    </div>
+                `);
 
                 this.generateItems(rawWorkbookData[sheetName], sheetName, barcodeKey, jenisMesinKey, remainingKeys);
             });
@@ -286,8 +292,8 @@
             ctx.fillStyle = "white";
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             ctx.fillStyle = "black";
-            ctx.font = "14.4pt Lato";
-            ctx.fillText('SN : ' + barcode, 9.675 * 2, 30.307 * 2);
+            ctx.font = "14.4pt 'Lato', sans-serif";
+            ctx.fillText(barcode, 9.675 * 2, 30.307 * 2);
 
             JsBarcode(bCanvas, String(barcode), { format: "CODE128", displayValue: false, margin: 1 });
             image.onload = function () {
@@ -311,7 +317,7 @@
             ctx.fillStyle = "black";
             ctx.textAlign = "center";
             ctx.textBaseline = 'middle';
-            ctx.font = "bold 20pt Lato";
+            ctx.font = "bold 20pt 'Lato', sans-serif";
             ctx.fillText(label, canvas.width / 2, canvas.height * 0.3);
             ctx.fillText(text, canvas.width / 2, canvas.height * 0.75);
             ctx.fillRect(canvas.width * 0.1, canvas.height / 2, canvas.width * 0.8, 3);
@@ -332,7 +338,7 @@
             ctx.fillStyle = "black";
             ctx.textAlign = "center";
             ctx.textBaseline = 'middle';
-            ctx.font = "bold 22pt Lato";
+            ctx.font = "bold 22pt 'Lato', sans-serif";
             ctx.fillText(text, canvas.width / 2, canvas.height / 2);
 
             return canvas;
