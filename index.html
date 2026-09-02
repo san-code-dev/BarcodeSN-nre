@@ -1,211 +1,367 @@
 <!-- External resources -->
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet"
-  crossorigin="anonymous">
+    crossorigin="anonymous">
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"
-  crossorigin="anonymous"></script>
+    crossorigin="anonymous"></script>
 <script src="https://ajax.googleapis.com/ajax/libs/jquery/2.1.1/jquery.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.8.0/jszip.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.8.0/xlsx.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
 
 <style>
-  /* Global styles */
-  * {
-    font-family: 'Lato' !important;
-  }
-
-  /* Print styles */
-  @media print {
-    @page {
-      size: A3;
-      margin: 0;
+    * {
+        font-family: 'Lato', sans-serif !important;
     }
-  }
 
-  /* Custom font */
-  @font-face {
-    font-family: 'Lato';
-    src: url('Lato-Regular.ttf');
-  }
+    @font-face {
+        font-family: 'Lato';
+        src: url('Lato-Regular.ttf');
+    }
 
-  /* Canvas styles */
-  canvas {
-    margin: 3px;
-    border: 1px solid;
-  }
+    /* Cetak: ukuran dinamis mengikuti isi konten */
+    @media print {
+        @page {
+            size: auto;
+            margin: 5mm;
+        }
 
-  /* a3 page style */
-  .a3 {
-    width: 32cm;
-    background: white;
-    min-height: 48.3cm;
-  }
+        body {
+            background: white !important;
+        }
+
+        .page-container {
+            box-shadow: none !important;
+            margin: 0 auto !important;
+        }
+    }
+
+    /* Kontainer pratinjau melebar fleksibel */
+    .page-container {
+        background: white;
+        width: fit-content;
+        min-width: 100%;
+        box-sizing: border-box;
+        padding: 10px;
+        margin: 0 auto 20px auto;
+        box-shadow: 0 0 10px rgba(0, 0, 0, 0.25);
+    }
+
+    /* 1 baris data Excel = 1 baris canvas horizontal sejajar (tanpa wrap) */
+    .item-row {
+        display: block;
+        white-space: nowrap;
+        width: fit-content;
+        margin-bottom: 3px;
+        font-size: 0;
+        page-break-inside: avoid;
+    }
+
+    canvas {
+        margin: 1px 2px;
+        border: 1px solid #ddd;
+        display: inline-block;
+        vertical-align: middle;
+    }
 </style>
 
 <!-- UI Elements -->
-<div class="container p-5 d-print-none">
-  <form enctype="multipart/form-data" class="row">
-    <input id="upload" type="file" name="files[]" class="col-9">
-    <a href="format.xlsx" class="btn btn-success btn-sm col-2">Format Excel</a>
-    <a href="#" class="btn btn-light btn-sm col-1" onclick="window.print()">Print</a>
-  </form>
+<div class="container-fluid p-4 d-print-none bg-light border-bottom">
+    <div class="row g-3 align-items-center mb-3">
+        <div class="col-md-9 col-sm-8">
+            <label class="form-label fw-bold">Unggah Excel</label>
+            <input id="upload" type="file" name="files[]" class="form-control" accept=".xlsx, .xls">
+        </div>
+        <div class="col-md-3 col-sm-4 d-flex align-items-end">
+            <button class="btn btn-primary w-100" onclick="window.print()">Print</button>
+        </div>
+    </div>
 
-  <ul class="nav nav-tabs" id="myTab" role="tablist"></ul>
+    <!-- Panel Mapping & Kontrol Kolom -->
+    <div id="mappingSection" class="card d-none">
+        <div class="card-body">
+            <!-- Pilihan Kolom Utama -->
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label fw-bold mb-1">Kolom Barcode (SN)</label>
+                    <select id="mapBarcode" class="form-select form-select-sm"></select>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label fw-bold mb-1">Kolom Jenis Mesin (Label Atas)</label>
+                    <select id="mapJenisMesin" class="form-select form-select-sm"></select>
+                </div>
+            </div>
+
+            <!-- Checkbox Enable / Disable Field Sisa -->
+            <div class="mt-4 pt-3 border-top">
+                <div class="d-flex justify-content-between align-items-center mb-2">
+                    <label class="form-label fw-bold mb-0">Field Sisa (Centang untuk Menampilkan):</label>
+                    <div>
+                        <button type="button" id="btnCheckAll"
+                            class="btn btn-outline-secondary btn-sm py-0 px-2">Centang Semua</button>
+                        <button type="button" id="btnUncheckAll"
+                            class="btn btn-outline-secondary btn-sm py-0 px-2">Hapus Semua</button>
+                    </div>
+                </div>
+                <div id="autoFieldsContainer" class="d-flex flex-wrap gap-3 py-1"></div>
+            </div>
+        </div>
+    </div>
+
+    <ul class="nav nav-tabs mt-4" id="myTab" role="tablist"></ul>
 </div>
 
-<div class="tab-content text-center pt-3" style="background: gray;" id="myTabContent"></div>
+<!-- Output Container dengan auto scroll horizontal -->
+<div class="tab-content text-start py-4 overflow-auto" style="background: #555; min-height: 100vh;" id="myTabContent">
+</div>
 
 <script>
-  // GitHub commits fetch (example, can be used for other purposes)
-  const repoOwner = "BoneDeath";
-  const repoName = "BarcodeSN-nre";
-  const branchName = 'testing';
+    let rawWorkbookData = {};
+    let detectedHeaders = [];
+    // Simpan status toggle field sisa: { 'NAMA_KOLOM': true/false }
+    let autoFieldsState = {};
 
-  fetch(`https://api.github.com/repos/${repoOwner}/${repoName}/commits?sha=${branchName}`,{cache: "no-cache"})
-    .then(response => {
-      if (!response.ok) throw new Error('Network response was not ok');
-      return response.json(); // Parse JSON
-    })
-    .then(commits => {
-      commits.reverse().forEach(commit => {
-        console.log(`Commit message: ${commit.commit.message}`);
-        console.log(`Author: ${commit.commit.author.name}`);
-        console.log(`Date: ${commit.commit.author.date}`);
-        console.log('---');
-      });
-    })
-    .catch(error => {
-      console.error('There was a problem with the fetch operation:', error);
+    // Setup dropdown mapping kolom utama
+    function setupMappingSelectors(headers) {
+        const barcodeSelect = $('#mapBarcode').empty();
+        const jenisMesinSelect = $('#mapJenisMesin').empty();
+
+        barcodeSelect.append('<option value="">-- Lewati Barcode --</option>');
+        jenisMesinSelect.append('<option value="">-- Lewati Jenis Mesin --</option>');
+
+        headers.forEach(header => {
+            const clean = header.trim().toUpperCase();
+            const isBarcode = clean.includes('BARCODE') || clean.includes('SN');
+            const isMesin = clean.includes('MESIN') || clean.includes('JENIS');
+
+            barcodeSelect.append(`<option value="${header}" ${isBarcode ? 'selected' : ''}>${header}</option>`);
+            jenisMesinSelect.append(`<option value="${header}" ${isMesin ? 'selected' : ''}>${header}</option>`);
+        });
+
+        $('#mappingSection').removeClass('d-none');
+        updateAutoFieldsUI();
+    }
+
+    // Generate daftar checkbox untuk field sisa
+    function updateAutoFieldsUI() {
+        const selectedBarcode = $('#mapBarcode').val();
+        const selectedJenis = $('#mapJenisMesin').val();
+        const container = $('#autoFieldsContainer').empty();
+
+        // Dapatkan field yang bukan barcode & jenis mesin
+        const remainingHeaders = detectedHeaders.filter(h => h !== selectedBarcode && h !== selectedJenis);
+
+        if (remainingHeaders.length === 0) {
+            container.html('<em class="text-muted small">Tidak ada field sisa yang tersedia.</em>');
+            triggerAutoRender();
+            return;
+        }
+
+        remainingHeaders.forEach((header, idx) => {
+            // Default aktif (checked = true) jika baru pertama kali ditemukan
+            if (autoFieldsState[header] === undefined) {
+                autoFieldsState[header] = true;
+            }
+            const isChecked = autoFieldsState[header] ? 'checked' : '';
+
+            container.append(`
+        <div class="form-check form-check-inline">
+          <input class="form-check-input field-checkbox" type="checkbox" id="check_${idx}" data-field="${header}" ${isChecked}>
+          <label class="form-check-label small" for="check_${idx}">${header}</label>
+        </div>
+      `);
+        });
+
+        triggerAutoRender();
+    }
+
+    // Dapatkan daftar field sisa yang sedang dicentang aktif
+    function getEnabledRemainingFields() {
+        const enabled = [];
+        $('.field-checkbox:checked').each(function () {
+            enabled.push($(this).data('field'));
+        });
+        return enabled;
+    }
+
+    // Panggil proses render otomatis
+    function triggerAutoRender() {
+        if (Object.keys(rawWorkbookData).length === 0) return;
+        const barcodeKey = $('#mapBarcode').val();
+        const jenisMesinKey = $('#mapJenisMesin').val();
+        const remainingKeys = getEnabledRemainingFields();
+
+        const renderer = new ExcelRenderer();
+        renderer.renderAll(barcodeKey, jenisMesinKey, remainingKeys);
+    }
+
+    // Event Listener untuk Auto Render Instan
+    $('#mapBarcode, #mapJenisMesin').on('change', function () {
+        updateAutoFieldsUI();
     });
-</script>
 
-<script>
-  // Excel parsing and tab generation
-  class ExcelParser {
-    parse(file) {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const data = e.target.result;
-        const workbook = XLSX.read(data, { type: 'binary' });
+    $(document).on('change', '.field-checkbox', function () {
+        const field = $(this).data('field');
+        autoFieldsState[field] = $(this).is(':checked');
+        triggerAutoRender();
+    });
 
-        workbook.SheetNames.forEach(sheetName => {
-          // Create tabs for each sheet
-          $("#myTab").append(`
+    $('#btnCheckAll').on('click', function () {
+        $('.field-checkbox').prop('checked', true).each(function () {
+            autoFieldsState[$(this).data('field')] = true;
+        });
+        triggerAutoRender();
+    });
+
+    $('#btnUncheckAll').on('click', function () {
+        $('.field-checkbox').prop('checked', false).each(function () {
+            autoFieldsState[$(this).data('field')] = false;
+        });
+        triggerAutoRender();
+    });
+
+    class ExcelRenderer {
+        renderAll(barcodeKey, jenisMesinKey, remainingKeys) {
+            $('#myTab, #myTabContent').empty();
+
+            const sheetNames = Object.keys(rawWorkbookData);
+
+            sheetNames.forEach((sheetName, index) => {
+                const isActive = index === 0;
+
+                $('#myTab').append(`
           <li class="nav-item" role="presentation">
-            <button class="nav-link" id="${sheetName}-tab" data-bs-toggle="tab" data-bs-target="#${sheetName}" type="button" role="tab" aria-controls="${sheetName}" aria-selected="true">${sheetName}</button>
+            <button class="nav-link ${isActive ? 'active' : ''}" id="${sheetName}-tab" data-bs-toggle="tab" data-bs-target="#${sheetName}" type="button" role="tab">${sheetName}</button>
           </li>
         `);
 
-          const sheetData = XLSX.utils.sheet_to_row_object_array(workbook.Sheets[sheetName]);
-          this.addTabContent(sheetData, sheetName);
-        });
-      };
-      reader.onerror = (ex) => console.log(ex);
-      reader.readAsBinaryString(file);
+                $('#myTabContent').append(`
+          <div class="tab-pane fade ${isActive ? 'show active' : ''}" id="${sheetName}" role="tabpanel">
+            <div class="page-container" id="lato-${sheetName}"></div>
+          </div>
+        `);
+
+                this.generateItems(rawWorkbookData[sheetName], sheetName, barcodeKey, jenisMesinKey, remainingKeys);
+            });
+        }
+
+        generateItems(data, sheetName, barcodeKey, jenisMesinKey, remainingKeys) {
+            const container = $("#lato-" + sheetName);
+
+            data.forEach(item => {
+                const rowWrapper = $('<div class="item-row"></div>');
+
+                // 1. Barcode
+                if (barcodeKey && item[barcodeKey]) {
+                    rowWrapper.append(this.createBarcode(item[barcodeKey]));
+                }
+
+                // 2. Jenis Mesin
+                if (jenisMesinKey && item[jenisMesinKey]) {
+                    const barcodeLabel = barcodeKey ? (item[barcodeKey] || '') : '';
+                    rowWrapper.append(this.createTextCanvas(item[jenisMesinKey], barcodeLabel));
+                }
+
+                // 3. Field sisa yang di-enable
+                remainingKeys.forEach(key => {
+                    if (item[key] !== undefined && item[key] !== null && String(item[key]).trim() !== '') {
+                        rowWrapper.append(this.createTextCode(item[key]));
+                    }
+                });
+
+                container.append(rowWrapper);
+            });
+        }
+
+        createBarcode(barcode) {
+            const bCanvas = document.createElement('canvas');
+            const image = new Image();
+            const canvas = document.createElement("canvas");
+
+            canvas.height = 37.795 * 2;
+            canvas.width = 151.181 * 2;
+            canvas.style.width = "4cm";
+            canvas.style.height = "1cm";
+
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = "white";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = "black";
+            ctx.font = "14.4pt Lato";
+            ctx.fillText('SN : ' + barcode, 9.675 * 2, 30.307 * 2);
+
+            JsBarcode(bCanvas, String(barcode), { format: "CODE128", displayValue: false, margin: 1 });
+            image.onload = function () {
+                ctx.drawImage(image, 14, 14, 137.18 * 2, 24);
+            };
+            image.src = bCanvas.toDataURL("image/jpeg", 2.0);
+
+            return canvas;
+        }
+
+        createTextCanvas(text, label) {
+            const canvas = document.createElement("canvas");
+            canvas.height = 143;
+            canvas.width = 379;
+            canvas.style.width = "3.2cm";
+            canvas.style.height = "1.2cm";
+
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = "white";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = "black";
+            ctx.textAlign = "center";
+            ctx.textBaseline = 'middle';
+            ctx.font = "bold 20pt Lato";
+            ctx.fillText(label, canvas.width / 2, canvas.height * 0.3);
+            ctx.fillText(text, canvas.width / 2, canvas.height * 0.75);
+            ctx.fillRect(canvas.width * 0.1, canvas.height / 2, canvas.width * 0.8, 3);
+
+            return canvas;
+        }
+
+        createTextCode(text) {
+            const canvas = document.createElement("canvas");
+            canvas.height = 143;
+            canvas.width = 379;
+            canvas.style.width = "3.2cm";
+            canvas.style.height = "1.2cm";
+
+            const ctx = canvas.getContext('2d');
+            ctx.fillStyle = "white";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = "black";
+            ctx.textAlign = "center";
+            ctx.textBaseline = 'middle';
+            ctx.font = "bold 22pt Lato";
+            ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+
+            return canvas;
+        }
     }
 
-    addTabContent(data, sheetName) {
-      // Add content for each sheet tab
-      $("#myTabContent").append(`
-      <div class="tab-pane fade a3 mx-auto" id="${sheetName}" role="tabpanel" aria-labelledby="${sheetName}-tab">
-        <div class="row">
-          <div class="col p-0" id="lato-${sheetName}"></div>
-        </div>
-      </div>
-    `);
-      this.generateBarcodes(data, sheetName);
-    }
+    // Upload handler
+    document.getElementById('upload').addEventListener('change', (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
 
-    generateBarcodes(data, sheetName) {
-      data.forEach(item => {
-        // Create barcode and text canvases for each row
-        this.createBarcode(item['BARCODE'], sheetName);
-        this.createTextCanvas(item['JENIS MESIN'], item['BARCODE'], sheetName);
-        this.createTextCode(item['FIELD1'], 'Field1', sheetName);
-        this.createTextCode(item['FIELD2'], 'Field2', sheetName);
-        this.createTextCode(item['FIELD3'], 'Field3', sheetName);
-        this.createTextCode(item['FIELD4'], 'Field4', sheetName);
-        this.createTextCode(item['FIELD5'], 'Field5', sheetName);
-        this.createTextCode(item['FIELD6'], 'Field6', sheetName);
-        this.createTextCode(item['FIELD7'], 'Field7', sheetName);
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+            const workbook = XLSX.read(evt.target.result, { type: 'binary' });
+            rawWorkbookData = {};
+            detectedHeaders = [];
+            autoFieldsState = {};
 
-      });
-    }
+            workbook.SheetNames.forEach(sheetName => {
+                const sheetData = XLSX.utils.sheet_to_row_object_array(workbook.Sheets[sheetName]);
+                rawWorkbookData[sheetName] = sheetData;
 
-    createBarcode(barcode, sheetName) {
-      //generate barcode image
-      var bCanvas = document.createElement('canvas');
-      var image = new Image();
+                if (sheetData.length > 0 && detectedHeaders.length === 0) {
+                    detectedHeaders = Object.keys(sheetData[0]);
+                }
+            });
 
-      var canvas = document.createElement("canvas");
-      canvas.height = 37.795275591 * 2;
-      canvas.width = 151.18110236 * 2;
-      canvas.style.width = "4cm";
-      canvas.style.height = "1cm";
-
-      var ctx = canvas.getContext('2d');
-      ctx.fillStyle = "white";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = "black";
-      ctx.font = "14.4pt Lato";
-      ctx.fillText('SN : ' + barcode, 9.6755905512 * 2, 30.307086614 * 2);
-      ctx.fillStyle = "black";
-
-      JsBarcode(bCanvas, barcode, { format: "CODE128", displayValue: false, margin: 1 });
-      image.onload = function () {
-        ctx.drawImage(image, 7 * 2, 7 * 2, 137.18110236 * 2, 12 * 2);
-      };
-      image.src = bCanvas.toDataURL("image/jpeg", 2.0);
-
-      $("#lato-" + sheetName).append(canvas);
-    }
-
-    createTextCanvas(text, label, sheetName) {
-      const canvas = document.createElement("canvas");
-      canvas.height = 143;
-      canvas.width = 379;
-      canvas.style.width = "3.2cm";
-      canvas.width = 379;
-      canvas.style.height = "1.2cm";
-      const ctx = canvas.getContext('2d');
-      ctx.fillStyle = "white";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = "black";
-      ctx.textAlign = "center";
-      ctx.textBaseline = 'middle';
-      ctx.font = "bold 20pt Lato";
-      ctx.fillText(label, canvas.width / 2, canvas.height * 0.3);
-      ctx.fillText(text, canvas.width / 2, canvas.height * 0.75);
-      ctx.fillRect(canvas.width * 0.1, canvas.height / 2, canvas.width * 0.8, 3);
-      $("#lato-" + sheetName).append(canvas);
-    }
-
-    createTextCode(text, label, sheetName) {
-      const canvas = document.createElement("canvas");
-      canvas.height = 143;
-      canvas.width = 379;
-      canvas.style.width = "3.2cm";
-      canvas.width = 379;
-      canvas.style.height = "1.2cm";
-      const ctx = canvas.getContext('2d');
-      ctx.fillStyle = "white";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = "black";
-      ctx.textAlign = "center";
-      ctx.textBaseline = 'middle';
-      ctx.font = "bold 22pt Lato";
-      ctx.fillText(text, canvas.width / 2, canvas.height / 2);
-      $("#lato-" + sheetName).append(canvas);
-    }
-
-  }
-
-
-
-  // File input event listener
-  document.getElementById('upload').addEventListener('change', (e) => {
-    const file = e.target.files[0];
-    const parser = new ExcelParser();
-    parser.parse(file);
-  });
+            setupMappingSelectors(detectedHeaders);
+        };
+        reader.readAsBinaryString(file);
+    });
 </script>
